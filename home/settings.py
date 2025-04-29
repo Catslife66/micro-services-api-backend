@@ -1,5 +1,4 @@
-from ctypes import cast
-from email.policy import default
+from datetime import timedelta
 from decouple import config
 from pathlib import Path
 
@@ -20,10 +19,13 @@ ALLOWED_HOSTS = []
 
 if DEBUG:
     ALLOWED_HOSTS += [
+        '0.0.0.0',
+        'backend',
         'localhost',
         '127.0.0.1',
         'localhost:3000',
         '127.0.0.1:3000',
+        '172.20.0.2',
     ]
 
 # Application definition
@@ -43,6 +45,8 @@ INSTALLED_APPS = [
 
     # my apps
     'auth_service',
+    'customers',
+    'subscriptions'
 ]
 
 MIDDLEWARE = [
@@ -142,6 +146,11 @@ if DEBUG:
     CORS_ALLOWED_ORIGINS += [
         'http://localhost:3000',
         'http://127.0.0.1:3000',
+        
     ]
 #CORS_ALLOWED_ORIGIN_REGEXES = [r'^https://\w+\.example\.com$',]
 
+NINJA_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=5),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+}

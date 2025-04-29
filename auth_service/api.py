@@ -30,7 +30,7 @@ class UserController:
     @route.post('/register', response={201: UserOut, 400: ErrorUserSchema})
     def register_user(self, payload: UserIn):
         if AppUser.objects.filter(email=payload.email).exists():
-            return 400, {'error': "This email has been registeredd."}
+            return 400, {'error': "This email has been registered."}
 
         try:
             password = make_password(payload.password)

@@ -7,10 +7,28 @@ services:
       - .env
     ports:
       - "8000:8000"
+    volumes:
+      - .:/app
     networks:
       - app-network
     depends_on:
       - db
+
+  frontdend:
+    build:
+      context: ../frontend-nextjs/
+    container_name: saas-frontend
+    env_file:
+      - ../frontend-nextjs/.env
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../frontend-nextjs:/app
+      - /app/node_modules
+    networks:
+      - app-network
+    depends_on:
+      - backend
 
   db:
     image: postgres:latest
