@@ -2,6 +2,7 @@ from ninja_extra import NinjaExtraAPI, api_controller, route
 from ninja_jwt.controller import TokenObtainPairController, TokenVerificationController
 from auth_service.api import UserController
 from auth_service.schemas import MyTokenObtainPairSchema, MyTokenObtainPairOutSchema
+from payments.api import PaymentController
 from subscriptions.api import SubscriptionController
 
 api = NinjaExtraAPI()
@@ -18,6 +19,7 @@ class MyNinjaJwtController(TokenObtainPairController, TokenVerificationControlle
 
 api.register_controllers(
     MyNinjaJwtController, 
+    PaymentController,
     UserController, 
     SubscriptionController
 )

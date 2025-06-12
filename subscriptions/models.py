@@ -1,7 +1,9 @@
-from annotated_types import Interval
+import datetime
+from django.utils import timezone
 from django.conf import settings
 from django.contrib.auth.models import Group, Permission
 from django.db import models
+from django.db.models import Q
 from django.db.models.signals import post_save
 
 import helpers.billing
@@ -11,7 +13,7 @@ User = settings.AUTH_USER_MODEL
 ALLOW_CUSTOM_GROUPS = True
 
 
-# SubscriptionPlans -> stripe product
+# SubscriptionPlans -> stripe product -> prod_xxx
 class SubscriptionPlan(models.Model):
     name = models.CharField(max_length=20)
     descriptions = models.TextField(null=True, blank=True)
@@ -51,7 +53,7 @@ class SubscriptionPlan(models.Model):
         super().save(*args, **kwargs)
 
 
-# subscription price -> stripe price
+# subscription price -> stripe price -> price_xxx
 class SubscriptionPlanPrice(models.Model):
     class IntervalChoices(models.TextChoices):
         MONTHLY = 'month', 'Monthly'
@@ -111,10 +113,102 @@ class SubscriptionPlanPrice(models.Model):
             qs.update(featured=False)
 
 
+class UserSubscriptionQuerySet(models.QuerySet):
+    def by_range(self, day_start=7, day_end=120):
+        now = timezone.now()
+        days_start_from_now = now + datetime.timedelta(days=day_start)
+        days_end_from_now = now + datetime.timedelta(days=day_end)
+        range_start = days_start_from_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        range_end = days_end_from_now.replace(hour=23, minute=59, second=59, microsecond=59)
+        return self.filter(
+            current_period_end__gte=range_start,
+            current_period_end__lte=range_end,
+        )
+
+    def by_days_left(self, days_left=7):
+        now = timezone.now()
+        in_n_days = now + datetime.timedelta(days=days_left)
+        day_start = in_n_days.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = in_n_days.replace(hour=23, minute=59, second=59, microsecond=59)
+        return self.filter(
+            current_period_end__gte=day_start,
+            current_period_end__lte=day_end,
+        )
+    
+    def by_days_ago(self, days_ago=3):
+        now = timezone.now()
+        in_n_days = now + datetime.timedelta(days=days_ago)
+        day_start = in_n_days.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = in_n_days.replace(hour=23, minute=59, second=59, microsecond=59)
+        return self.filter(
+            current_period_end__gte=day_start,
+            current_period_end__lte=day_end,
+        )
+
+    def by_active_trialing(self):
+        active_subs_lookup = (
+            Q(status = SubscriptionStatus.ACTIVE) |
+            Q(status = SubscriptionStatus.TRIALING)
+        )
+        return self.filter(active_subs_lookup)
+    
+    def by_user_ids(self, user_ids=None):
+        if isinstance(user_ids, list):
+            return self.filter(user_id__in=user_ids)
+        elif isinstance(user_ids, int):
+            return self.filter(user_id__in=[user_ids])
+        return self
+
+
+class UserSubscriptionManager(models.Manager):
+    def get_queryset(self):
+        return UserSubscriptionQuerySet(self.model, using=self.db)
+    
+
+class SubscriptionStatus(models.TextChoices):
+    INCOMPLETE = 'incomplete', 'Incomplete'
+    INCOMPLETE_EXPIRED = 'incomplete_expired', 'Incomplete Expired'
+    TRIALING = 'trialing', 'Trialing'
+    ACTIVE = 'active', 'Active'
+    PAST_DUE = 'past_due', 'Past Due'
+    CANCELED = 'canceled', 'Canceled'
+    UNPAID = 'unpaid', 'Unpaid'
+    PAUSED = 'paused', 'Paused'
+
+
+# user subscription -> stripe customer subcriptions -> sub_xxx
 class UserSubscription(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     subscription = models.ForeignKey(SubscriptionPlan, on_delete=models.SET_NULL, null=True, blank=True)
+    stripe_id = models.CharField(max_length=50, null=True, blank=True)
     active = models.BooleanField(default=True)
+    original_period_start = models.DateTimeField(auto_now_add=False, auto_now=False, null=True, blank=True)
+    current_period_start = models.DateTimeField(auto_now_add=False, auto_now=False, null=True, blank=True)
+    current_period_end = models.DateTimeField(auto_now_add=False, auto_now=False, null=True, blank=True)
+    cancel_at_period_end = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, choices=SubscriptionStatus, null=True, blank=True)
+    is_cancelled = models.BooleanField(default=False)
+    cancelled_at = models.DateTimeField(auto_now_add=False, auto_now=False, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def billing_cycle_anchor(self):
+        """
+        delay a new subscription until the current subscription runs out
+        """
+        if not self.current_period_end:
+            return None
+        return int(self.current_period_end.timestamp())
+    
+    @property
+    def is_allow_to_cancel(self):
+        return self.status in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
+
+    def save(self, *args, **kwargs):
+        if self.original_period_start is None and self.current_period_start is not None:
+            self.original_period_start = self.current_period_start
+        super().save(*args, **kwargs)
 
 
 def user_sub_post_save(sender, instance, *args, **kwargs):
@@ -124,17 +218,17 @@ def user_sub_post_save(sender, instance, *args, **kwargs):
     groups_ids = []
     if subscription_obj is not None:
         groups = subscription_obj.groups.all()
-        groups_ids = groups.value_list('id', flat=True)
+        groups_ids = groups.values_list('id', flat=True)
     if not ALLOW_CUSTOM_GROUPS:
         user.groups.set(groups_ids)
     else:
         subs_qs = SubscriptionPlan.objects.filter(active=True)
         if subscription_obj is not None:
             subs_qs = subs_qs.exclude(id=subscription_obj.id)
-        subs_groups = subs_qs.values_list('group__id', flat=True)
+        subs_groups = subs_qs.values_list('groups__id', flat=True)
         subs_groups_set = set(subs_groups)
         
-        current_groups = user.groups.all().value_list('id', flat=True)
+        current_groups = user.groups.all().values_list('id', flat=True)
         groups_ids_set = set(groups_ids)
         current_groups_set = set(current_groups) - subs_groups_set
         final_groups_ids = list(groups_ids_set | current_groups_set)

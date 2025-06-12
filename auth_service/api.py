@@ -5,13 +5,16 @@ from django.core.mail import send_mail
 from django.http.response import JsonResponse
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404
 from ninja_extra import api_controller, route
 from ninja_jwt.authentication import JWTAuth
+from ninja_jwt.tokens import RefreshToken
+
 from ninja.security import django_auth
 
 from .schemas import UserSchema, UserIn, UserOut, ErrorUserSchema, PasswordForgotSchema, PasswordResetSchema
 from .models import AppUser
+
 
 @api_controller('/users', tags=['Auth'])
 class UserController:
@@ -49,8 +52,8 @@ class UserController:
             token = default_token_generator.make_token(user)
             
             #{{ protocol}}://{{ domain }}{% url 'password_reset_confirm' uidb64=uid token=token %}
-            frontend_url = settings.CORS_ALLOWED_ORIGINS[0]
-            reset_link = f"{frontend_url}/reset-password?uidb64={uid}&token={token}"
+            url_prefix = settings.CORS_ALLOWED_ORIGINS[0]
+            reset_link = f"{url_prefix}/reset-password?uidb64={uid}&token={token}"
             
             send_mail(
                 "Password Reset Request",
@@ -93,3 +96,17 @@ class UserController:
         except Exception as e:
             return 400, {'error': str(e)}
         
+
+    @route.get('/session')
+    def check_user_status(self, request):
+        refresh = request.headers.get("refresh")
+        isValidToken = False
+        try:
+            RefreshToken(refresh)
+            isValidToken = True
+        except:
+            isValidToken = False
+        print('data is ', isValidToken)
+        print('user is ', request.user)
+
+        return JsonResponse({'data': isValidToken})

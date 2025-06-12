@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     # my apps
     'auth_service',
     'customers',
+    'payments',
     'subscriptions'
 ]
 
@@ -119,7 +120,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Europe/London'
 
 USE_I18N = True
 
@@ -151,6 +152,6 @@ if DEBUG:
 #CORS_ALLOWED_ORIGIN_REGEXES = [r'^https://\w+\.example\.com$',]
 
 NINJA_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=5),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=3),
 }
